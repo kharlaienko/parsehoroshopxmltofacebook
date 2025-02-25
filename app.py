@@ -55,12 +55,24 @@ def transform_xml(root: ET.Element) -> ET.Element:
 
         ET.SubElement(new_item, "g:id").text = item.findtext("id", default="N/A")
         ET.SubElement(new_item, "g:title").text = item.findtext("name", default="Товар Розвідки Ноєм")
-        ET.SubElement(new_item, "g:description").text = DEFAULT_ITEM_DESCRIPTION if item.findtext("description") == "" else item.findtext("description")
+
+        desc = item.findtext("description")
+        
+        if not desc:
+            ET.SubElement(new_item, "g:description").text = DEFAULT_ITEM_DESCRIPTION
+        else:
+            ET.SubElement(new_item, "g:description").text = desc
+        
         ET.SubElement(new_item, "g:link").text = item.findtext("url", default="#")
         ET.SubElement(new_item, "g:image_link").text = item.findtext("image", default="#")
         ET.SubElement(new_item, "g:price").text = item.findtext("priceRUAH", default="0 UAH")
-        ET.SubElement(new_item, "g:availability").text = item.findtext("stock", default="0 UAH")
-        ET.SubElement(new_item, "g:condition").text = "Новий"
+
+        if item.findtext("stock") == 'В наличии':
+            ET.SubElement(new_item, "g:availability").text = 'in stock'
+        else:
+            ET.SubElement(new_item, "g:availability").text = 'out of stock'
+
+        ET.SubElement(new_item, "g:condition").text = "new"
 
     return rss
 
