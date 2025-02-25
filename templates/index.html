@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>XML Converter</title>
+   <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen">
+   <div class="w-full max-w-md p-6 bg-gray-800 rounded-lg shadow-md">
+      <h1 class="text-2xl font-bold text-center mb-4">Конвертувати XML (Hotline) в фейсбук</h1>
+
+
+      <h2 class="text-lg font-semibold">Вставити посилання</h2>
+      <form id="urlForm">
+         <input type="text" id="xmlUrl" placeholder="Enter XML URL" required
+            class="w-full p-2 border border-gray-700 bg-gray-700 rounded mt-2">
+         <button type="submit" class="w-full mt-3 bg-green-500 hover:bg-green-600 py-2 rounded">Конвертувати</button>
+      </form>
+
+      <p id="result" class="mt-10 text-center text-sm">
+
+      </p>
+   </div>
+
+   <script>
+      document.getElementById("urlForm").onsubmit = function (event) {
+         event.preventDefault();
+         let url = document.getElementById("xmlUrl").value;
+
+         fetch("/fetch", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `url=${encodeURIComponent(url)}`
+         })
+            .then(response => response.json())
+            .then(data => {
+               if (data.download_url) {
+                  document.getElementById("result").innerHTML = `<a href="${data.download_url}" class="text-white text-2xl bg-gradient-to-br from-purple-600 to-blue-500 hover:bg-gradient-to-bl focus:ring-4 focus:outline-none focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg px-5 py-2.5 text-center" download>Скачати</a>`;
+               } else {
+                  document.getElementById("result").innerText = "Помилка XML.";
+               }
+            });
+      };
+   </script>
+</body>
+
+</html>
