@@ -1,140 +1,97 @@
 import os
-import requests
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-from flask import Flask, request, render_template, send_from_directory, jsonify
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-NS = os.getenv("NS")
-META_TITLE = os.getenv("META_TITLE")
-META_LINK = os.getenv("META_LINK")
-META_DESC = os.getenv("META_DESC")
-DEFAULT_ITEM_DESCRIPTION = os.getenv("DEFAULT_ITEM_DESCRIPTION")
+import shutil
+import zipstream
+import os
+import zipfile
+from datetime import datetime
+from flask import Flask, request, render_template, send_file, jsonify
+from PIL import Image
 
 app = Flask(__name__)
 
-# Ensure directories exist
 UPLOAD_FOLDER = "uploads"
-TRANSFORMED_FOLDER = "transformed"
+COMPRESSED_FOLDER = "compressed"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(TRANSFORMED_FOLDER, exist_ok=True)
+os.makedirs(COMPRESSED_FOLDER, exist_ok=True)
 
-def fetch_xml(url: str) -> str:
-    """Fetch XML content from a given URL."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as e:
-        print(f"Error fetching XML: {e}")
-        return ""
-
-def parse_xml(xml_data: str) -> ET.Element:
-    """Parse XML data and return the root element."""
-    try:
-        return ET.fromstring(xml_data)
-    except ET.ParseError as e:
-        print(f"Error parsing XML: {e}")
-        return None
-
-def transform_xml(root: ET.Element) -> ET.Element:
-    """Transform the original XML structure into the required RSS format."""
-    rss = ET.Element("rss", {"xmlns:g": NS, "version": "2.0"})
-    channel = ET.SubElement(rss, "channel")
-
-    # Add metadata
-    ET.SubElement(channel, "title").text = META_TITLE
-    ET.SubElement(channel, "link").text = META_LINK
-    ET.SubElement(channel, "description").text = META_DESC
-
-    # Extract items from original XML
-    for item in root.findall(".//item"):
-        new_item = ET.SubElement(channel, "item")
-
-        ET.SubElement(new_item, "g:id").text = item.findtext("id", default="N/A")
-        ET.SubElement(new_item, "g:title").text = item.findtext("name", default="Товар Розвідки Ноєм")
-
-        desc = item.findtext("description")
-        
-        if not desc:
-            ET.SubElement(new_item, "g:description").text = DEFAULT_ITEM_DESCRIPTION
-        else:
-            ET.SubElement(new_item, "g:description").text = desc
-        
-        ET.SubElement(new_item, "g:link").text = item.findtext("url", default="#")
-        ET.SubElement(new_item, "g:image_link").text = item.findtext("image", default="#")
-        ET.SubElement(new_item, "g:price").text = item.findtext("priceRUAH", default="0 UAH")
-
-        if item.findtext("stock") == 'В наличии':
-            ET.SubElement(new_item, "g:availability").text = 'in stock'
-        else:
-            ET.SubElement(new_item, "g:availability").text = 'out of stock'
-
-        ET.SubElement(new_item, "g:condition").text = "new"
-
-    return rss
-
-def save_xml(element: ET.Element) -> str:
-    """Save the formatted XML to a file."""
-    filename = f"converted.xml"
-    filepath = os.path.join(TRANSFORMED_FOLDER, filename)
-
-    rough_string = ET.tostring(element, encoding="utf-8")
-    parsed = minidom.parseString(rough_string)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(parsed.toprettyxml(indent="  "))
-
-    return filename
+def compress_image(input_path, output_path, quality=70):
+    """Compress an image and save it."""
+    with Image.open(input_path) as img:
+        img = img.convert("RGB")
+        img.save(output_path, "JPEG", quality=quality)
 
 @app.route("/")
 def home():
-    """Render the upload form."""
     return render_template("index.html")
 
 @app.route("/upload", methods=["POST"])
-def upload_file():
-    """Handle file upload and transformation."""
-    if "file" not in request.files:
-        return "No file part", 400
+def upload_images():
+    if "images" not in request.files:
+        return jsonify({"error": "No files provided"}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return "No selected file", 400
+    files = request.files.getlist("images")
+    compressed_files = []
 
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(filepath)
+    for file in files:
+        if file.filename == "":
+            continue
 
-    tree = ET.parse(filepath)
-    root = tree.getroot()
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(file_path)
 
-    transformed_xml = transform_xml(root)
-    filename = save_xml(transformed_xml)
+        compressed_path = os.path.join(COMPRESSED_FOLDER, file.filename)
+        compress_image(file_path, compressed_path)
+        compressed_files.append(compressed_path)
 
-    return jsonify({"message": "File transformed successfully!", "download_url": f"/download/{filename}"})
+    return jsonify({"message": "Images compressed successfully!", "download_url": "/download"})
 
-@app.route("/download/<filename>")
-def download_file(filename):
-    """Serve the transformed XML file for download."""
-    return send_from_directory(TRANSFORMED_FOLDER, filename, as_attachment=True)
 
-@app.route("/fetch", methods=["POST"])
-def fetch_from_url():
-    """Fetch XML from a URL and transform it."""
-    url = request.form.get("url")
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
+@app.route("/download")
+def download_compressed():
+    """Create a ZIP file with compressed images and delete files after download."""
+    zip_filename = "compressed_images.zip"
+    zip_path = os.path.join(COMPRESSED_FOLDER, zip_filename)
 
-    xml_data = fetch_xml(url)
-    if xml_data:
-        root = parse_xml(xml_data)
-        if root:
-            transformed_xml = transform_xml(root)
-            filename = save_xml(transformed_xml)
-            return jsonify({"message": "File transformed successfully!", "download_url": f"/download/{filename}"})
+    # Ensure compressed folder exists
+    if not os.path.exists(COMPRESSED_FOLDER):
+        print("Error: Compressed folder does not exist.")
+        return "No compressed images found.", 400
 
-    return jsonify({"error": "Failed to process XML"}), 500
+    files = [f for f in os.listdir(COMPRESSED_FOLDER) if os.path.isfile(os.path.join(COMPRESSED_FOLDER, f))]
+    
+    # Ensure there are images to zip
+    if not files:
+        print("Error: No files found in compressed folder.")
+        return "No images available for download.", 400
+
+    # Create ZIP file
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for file in files:
+                file_path = os.path.join(COMPRESSED_FOLDER, file)
+                zipf.write(file_path, arcname=file)
+        
+        # Ensure ZIP was actually created
+        if not os.path.exists(zip_path):
+            print("Error: ZIP file was not created.")
+            return "Failed to create ZIP file.", 500
+        
+        print(f"ZIP file created successfully: {zip_path}")
+
+    except Exception as e:
+        print(f"Error creating ZIP: {e}")
+        return f"Error creating ZIP: {e}", 500
+
+    # Send ZIP file to user
+    response = send_file(zip_path, as_attachment=True)
+
+    # Cleanup files after successful download
+    shutil.rmtree(UPLOAD_FOLDER, ignore_errors=True)
+    shutil.rmtree(COMPRESSED_FOLDER, ignore_errors=True)
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(COMPRESSED_FOLDER, exist_ok=True)
+
+    return response
 
 if __name__ == "__main__":
     app.run(debug=True)
